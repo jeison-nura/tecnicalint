@@ -108,6 +108,7 @@ The contract is provider-independent. `schemaVersion` is explicit. Amounts are r
 | `policyNumber` | Validated policy reference, e.g. `POL-CO-000187342`. |
 | `status` | `pending`, `captured`, `failed` or `refunded`. |
 | `amountMinor` | Integer amount in the currency's minor unit (CLP exponent 0). |
+| `refundedAmountMinor` | Refunded amount in minor units when the provider supplies it; otherwise null. |
 | `currency` | Uppercase ISO 4217 currency (`MXN`, `COP`, `CLP`). |
 | `occurredAt` | Provider state-change time in UTC. |
 | `receivedAt` | Meridian receipt time in UTC. |

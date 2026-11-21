@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://api.meridian.example/schemas/premium-payment-v1.json",
+  "title": "Canonical Premium Payment Event",
+  "description": "Provider-independent payment state event. Contains no payer personal data, payment token, or raw provider payload.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "paymentKey",
+    "country",
+    "provider",
+    "providerEventId",
+    "providerTransactionId",
+    "policyNumber",
+    "status",
+    "amountMinor",
+    "refundedAmountMinor",
+    "currency",
+    "occurredAt",
+    "receivedAt",
+    "correlationId",
+    "reasonCode"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "description": "Major contract version. Incompatible changes require a new version."
+    },
+    "eventId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "description": "Stable identifier for this provider state-change event."
+    },
+    "paymentKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^(MX:Quetzal|CO:Andina|CL:Austral):.+$",
+      "description": "Stable business identity, also used for Salesforce Payment_Key__c upsert."
+    },
+    "country": {
+      "type": "string",
+      "enum": ["MX", "CO", "CL"]
+    },
+    "provider": {
+      "type": "string",
+      "enum": ["Quetzal", "Andina", "Austral"]
+    },
+    "providerEventId": {
+      "type": ["string", "null"],
+      "maxLength": 160,
+      "description": "Provider event ID, or deterministic ID derived from transaction state when none exists."
+    },
+    "providerTransactionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "policyNumber": {
+      "type": "string",
+      "pattern": "^POL-(MX|CO|CL)-[0-9]{9}$"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "captured", "failed", "refunded"]
+    },
+    "amountMinor": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Original payment amount in currency minor units; CLP has exponent zero.",
+      "examples": [18500000]
+    },
+    "refundedAmountMinor": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Refunded amount in minor units when supplied by provider; null otherwise.",
+      "examples": [null, 2500000]
+    },
+    "currency": {
+      "type": "string",
+      "enum": ["MXN", "COP", "CLP"]
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Provider state-change timestamp normalized to UTC."
+    },
+    "receivedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Meridian receipt timestamp in UTC."
+    },
+    "correlationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "reasonCode": {
+      "type": ["string", "null"],
+      "maxLength": 100,
+      "description": "Sanitized provider failure or reversal reason; never include personal data."
+    }
+  }
+}
