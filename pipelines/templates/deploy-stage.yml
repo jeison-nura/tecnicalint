@@ -1,0 +1,84 @@
+parameters:
+  - name: environmentName
+    type: string
+    values:
+      - dev
+      - test
+      - prod
+  - name: country
+    type: string
+    values:
+      - mx
+      - co
+  - name: dependsOn
+    type: object
+
+stages:
+  - stage: Deploy_${{ parameters.environmentName }}_${{ parameters.country }}
+    displayName: Deploy ${{ parameters.environmentName }} (${{ parameters.country }})
+    dependsOn: ${{ parameters.dependsOn }}
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: Terraform_${{ parameters.environmentName }}_${{ parameters.country }}
+        displayName: Terraform plan and apply
+        environment: ${{ parameters.environmentName }}-${{ parameters.country }}
+        variables:
+          - group: payment-intake-${{ parameters.environmentName }}-${{ parameters.country }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: TerraformInstaller@1
+                  inputs:
+                    terraformVersion: '1.9.8'
+
+                - task: AzureCLI@2
+                  displayName: Authenticate with federated service connection and apply
+                  inputs:
+                    azureSubscription: $(AZURE_SERVICE_CONNECTION)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+                      export ARM_USE_OIDC=true
+                      export ARM_USE_AZUREAD=true
+                      export ARM_CLIENT_ID="${servicePrincipalId}"
+                      export ARM_TENANT_ID="${tenantId}"
+                      export ARM_SUBSCRIPTION_ID="$(az account show --query id --output tsv)"
+                      export ARM_OIDC_TOKEN="${idToken}"
+
+                      terraform -chdir=infra init -input=false -reconfigure \
+                        -backend-config="resource_group_name=${TFSTATE_RESOURCE_GROUP}" \
+                        -backend-config="storage_account_name=${TFSTATE_STORAGE_ACCOUNT}" \
+                        -backend-config="container_name=${TFSTATE_CONTAINER}" \
+                        -backend-config="key=payment-intake/${{ parameters.environmentName }}/${{ parameters.country }}.tfstate" \
+                        -backend-config="use_azuread_auth=true" \
+                        -backend-config="use_oidc=true"
+
+                      export TF_VAR_environment="${{ parameters.environmentName }}"
+                      export TF_VAR_country="${{ parameters.country }}"
+                      export TF_VAR_location="${AZURE_LOCATION}"
+                      export TF_VAR_container_image="${CONTAINER_IMAGE}"
+                      export TF_VAR_enable_intake="${ENABLE_INTAKE}"
+                      export TF_VAR_worker_container_image="${WORKER_CONTAINER_IMAGE}"
+                      export TF_VAR_enable_processor="${ENABLE_PROCESSOR}"
+                      export TF_VAR_api_manager_egress_cidrs="${APIM_EGRESS_CIDRS_JSON}"
+                      export TF_VAR_sql_entra_admin_login="${SQL_ENTRA_ADMIN_LOGIN}"
+                      export TF_VAR_sql_entra_admin_object_id="${SQL_ENTRA_ADMIN_OBJECT_ID}"
+                      terraform -chdir=infra plan -input=false -out=tfplan
+                      terraform -chdir=infra apply -input=false -auto-approve tfplan
+                  env:
+                    TFSTATE_RESOURCE_GROUP: $(TFSTATE_RESOURCE_GROUP)
+                    TFSTATE_STORAGE_ACCOUNT: $(TFSTATE_STORAGE_ACCOUNT)
+                    TFSTATE_CONTAINER: $(TFSTATE_CONTAINER)
+                    AZURE_LOCATION: $(AZURE_LOCATION)
+                    CONTAINER_IMAGE: $(CONTAINER_IMAGE)
+                    ENABLE_INTAKE: $(ENABLE_INTAKE)
+                    WORKER_CONTAINER_IMAGE: $(WORKER_CONTAINER_IMAGE)
+                    ENABLE_PROCESSOR: $(ENABLE_PROCESSOR)
+                    APIM_EGRESS_CIDRS_JSON: $(APIM_EGRESS_CIDRS_JSON)
+                    SQL_ENTRA_ADMIN_LOGIN: $(SQL_ENTRA_ADMIN_LOGIN)
+                    SQL_ENTRA_ADMIN_OBJECT_ID: $(SQL_ENTRA_ADMIN_OBJECT_ID)

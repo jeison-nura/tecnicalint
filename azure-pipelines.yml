@@ -1,0 +1,85 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: Validate
+    displayName: Validate code and infrastructure
+    jobs:
+      - job: QualityGates
+        displayName: Tests, Terraform validation, and IaC scan
+        steps:
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: '1.9.8'
+
+          - script: |
+              terraform fmt -check -recursive infra
+              terraform -chdir=infra init -backend=false -input=false
+              terraform -chdir=infra validate
+            displayName: Format and validate Terraform without Azure access
+
+          - script: |
+              python3 -m pip install --disable-pip-version-check checkov
+              checkov --directory infra --framework terraform --quiet
+            displayName: Scan Terraform for insecure configuration
+
+          - script: |
+              java -version
+              mvn -f practical/pom.xml clean verify
+            displayName: Run Java tests and enforce coverage
+
+  - template: pipelines/templates/deploy-stage.yml
+    parameters:
+      environmentName: dev
+      country: mx
+      dependsOn:
+        - Validate
+
+  - template: pipelines/templates/deploy-stage.yml
+    parameters:
+      environmentName: dev
+      country: co
+      dependsOn:
+        - Validate
+
+  - template: pipelines/templates/deploy-stage.yml
+    parameters:
+      environmentName: test
+      country: mx
+      dependsOn:
+        - Deploy_dev_mx
+        - Deploy_dev_co
+
+  - template: pipelines/templates/deploy-stage.yml
+    parameters:
+      environmentName: test
+      country: co
+      dependsOn:
+        - Deploy_dev_mx
+        - Deploy_dev_co
+
+  - template: pipelines/templates/deploy-stage.yml
+    parameters:
+      environmentName: prod
+      country: mx
+      dependsOn:
+        - Deploy_test_mx
+        - Deploy_test_co
+
+  - template: pipelines/templates/deploy-stage.yml
+    parameters:
+      environmentName: prod
+      country: co
+      dependsOn:
+        - Deploy_test_mx
+        - Deploy_test_co
