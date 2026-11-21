@@ -2,8 +2,7 @@ package com.meridian.payments.domain.model;
 
 public enum PaymentProvider {
     QUETZAL("Quetzal", "MX", "MXN"),
-    ANDINA("Andina", "CO", "COP"),
-    AUSTRAL("Austral", "CL", "CLP");
+    ANDINA("Andina", "CO", "COP");
 
     private final String providerName;
     private final String country;

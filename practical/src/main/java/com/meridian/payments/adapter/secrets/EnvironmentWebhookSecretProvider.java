@@ -28,7 +28,6 @@ public class EnvironmentWebhookSecretProvider implements WebhookSecretProviderPo
         String currentVariable = switch (provider) {
             case QUETZAL -> "QUETZAL_WEBHOOK_SECRET";
             case ANDINA -> "ANDINA_WEBHOOK_SECRET";
-            case AUSTRAL -> "AUSTRAL_WEBHOOK_SECRET";
         };
         String current = environment.apply(currentVariable);
         if (current == null || current.isBlank()) {

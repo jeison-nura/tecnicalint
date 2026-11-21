@@ -20,7 +20,6 @@ import com.meridian.payments.domain.repository.PaymentNotificationRepository;
 import com.meridian.payments.port.ProviderWebhookAdapterPort;
 import com.meridian.payments.port.WebhookSecretProviderPort;
 import com.meridian.payments.domain.model.CanonicalPaymentEvent;
-import com.meridian.payments.domain.model.PaymentProvider;
 import com.meridian.payments.domain.model.PaymentState;
 import org.junit.jupiter.api.Test;
 
@@ -421,7 +420,6 @@ class ReceivePaymentWebhookServiceTest {
         WebhookSecretProviderPort rotated = provider -> switch (provider) {
             case QUETZAL -> List.of(QUETZAL_SECRET, "previous_test_secret");
             case ANDINA -> List.of(ANDINA_SECRET);
-            case AUSTRAL -> List.of("unused");
         };
         String previousSignature = hmacHex("previous_test_secret",
                 "1795888803.".getBytes(StandardCharsets.UTF_8), body);
@@ -449,7 +447,6 @@ class ReceivePaymentWebhookServiceTest {
         return provider -> switch (provider) {
             case QUETZAL -> List.of(QUETZAL_SECRET);
             case ANDINA -> List.of(ANDINA_SECRET);
-            case AUSTRAL -> List.of("unused");
         };
     }
 

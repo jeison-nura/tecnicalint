@@ -6,7 +6,6 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Locale;
-import java.util.UUID;
 
 public final class CanonicalPaymentEventBuilder {
     private static final long MAX_AMOUNT_MINOR = 9_999_999_999_999_999L;

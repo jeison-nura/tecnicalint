@@ -11,7 +11,6 @@ import com.meridian.payments.domain.model.CanonicalPaymentEventBuilder;
 import com.meridian.payments.domain.model.IntakeResult;
 import com.meridian.payments.domain.model.PaymentProvider;
 import com.meridian.payments.domain.model.PaymentStatus;
-import com.meridian.payments.error.DependencyUnavailableException;
 import com.meridian.payments.error.InvalidWebhookException;
 import com.meridian.payments.port.ReceivePaymentWebhookUseCase;
 import org.junit.jupiter.api.Test;
@@ -30,15 +29,13 @@ class InfrastructureAdaptersTest {
         Map<String, String> environment = Map.of(
                 "QUETZAL_WEBHOOK_SECRET", "quetzal-current",
                 "QUETZAL_PREVIOUS_WEBHOOK_SECRET", "quetzal-previous",
-                "ANDINA_WEBHOOK_SECRET", "andina-current",
-                "AUSTRAL_WEBHOOK_SECRET", "austral-current");
+                "ANDINA_WEBHOOK_SECRET", "andina-current");
         EnvironmentWebhookSecretProvider provider =
                 new EnvironmentWebhookSecretProvider(environment::get);
 
         assertEquals(List.of("quetzal-current", "quetzal-previous"),
                 provider.secretsFor(PaymentProvider.QUETZAL));
         assertEquals(List.of("andina-current"), provider.secretsFor(PaymentProvider.ANDINA));
-        assertEquals(List.of("austral-current"), provider.secretsFor(PaymentProvider.AUSTRAL));
 
         EnvironmentWebhookSecretProvider missing =
                 new EnvironmentWebhookSecretProvider(key -> null);

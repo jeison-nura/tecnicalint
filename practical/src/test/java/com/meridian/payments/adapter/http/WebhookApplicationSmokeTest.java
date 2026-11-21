@@ -13,7 +13,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import com.meridian.payments.domain.model.PaymentProvider;
 import com.meridian.payments.port.WebhookSecretProviderPort;
 
 import javax.crypto.Mac;
@@ -70,10 +69,7 @@ class WebhookApplicationSmokeTest {
         @Bean
         @Primary
         WebhookSecretProviderPort smokeTestSecrets() {
-            return provider -> switch (provider) {
-                case QUETZAL -> List.of(WEBHOOK_SECRET);
-                case ANDINA, AUSTRAL -> List.of("unused-test-secret");
-            };
+            return provider -> List.of(WEBHOOK_SECRET);
         }
     }
 }

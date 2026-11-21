@@ -1,5 +1,11 @@
 # API and event contracts
 
+## Contract files
+
+- [Webhook OpenAPI contract](webhooks.openapi.yaml) — shared provider webhook route and request/response shapes.
+- [Canonical payment event](events/premium-payment.schema.json) — provider-neutral event schema.
+- [Event guidance](events/README.md) — privacy and compatibility notes.
+
 `webhooks.openapi.yaml` defines one shared `POST /webhooks/v1/payments` route for Quetzal Pagos (MX), Andina Pay (CO), and Austral Pagos (CL), exposed through API Manager. The provider-specific signature-header profile selects an adapter; it does not authenticate the request until HMAC verification succeeds. `events/premium-payment.schema.json` defines the provider-independent event. Chile is included in the route contract and overall design; its intake implementation is outside the Part B practical scope.
 
 ## Signature and acknowledgement requirements
