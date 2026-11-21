@@ -1,6 +1,6 @@
 # API and event contracts
 
-`webhooks.openapi.yaml` defines the Mexico (Quetzal Pagos), Colombia (Andina Pay), and Chile (Austral Pagos) webhook endpoints exposed through API Manager. `events/premium-payment.schema.json` defines the provider-independent event. Chile's endpoint contract is included for completeness; its intake implementation is outside the Part B practical scope.
+`webhooks.openapi.yaml` defines one shared `POST /webhooks/v1/payments` route for Quetzal Pagos (MX), Andina Pay (CO), and Austral Pagos (CL), exposed through API Manager. The provider-specific signature-header profile selects an adapter; it does not authenticate the request until HMAC verification succeeds. `events/premium-payment.schema.json` defines the provider-independent event. Chile is included in the route contract and overall design; its intake implementation is outside the Part B practical scope.
 
 ## Signature and acknowledgement requirements
 

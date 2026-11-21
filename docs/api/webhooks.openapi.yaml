@@ -10,113 +10,53 @@ servers:
   - url: https://api.meridian.example
     description: Example only; replace per environment
 tags:
-  - name: Quetzal Pagos
-    description: Mexico payment notifications
-  - name: Andina Pay
-    description: Colombia payment notifications
-  - name: Austral Pagos
-    description: Chile payment notifications
+  - name: Payment webhooks
+    description: Shared provider webhook intake
 paths:
-  /webhooks/v1/quetzal:
+  /webhooks/v1/payments:
     post:
-      tags: [Quetzal Pagos]
-      operationId: receiveQuetzalWebhook
-      summary: Receive a Quetzal Pagos event
+      tags: [Payment webhooks]
+      operationId: receivePaymentWebhook
+      summary: Receive a payment notification from any supported provider
       description: >
-        Verify Quetzal-Signature against the exact raw body bytes before JSON
-        parsing. Reject timestamps more than 300 seconds from server time.
-        During secret rotation, accept any matching v1 signature using a
-        constant-time comparison. Quetzal retries failed deliveries for up to
-        three days. Return a 2xx only after durable acceptance or a confirmed
-        duplicate.
+        The single shared endpoint accepts provider-specific payloads. Select
+        the adapter using exactly one signature-header profile: Quetzal-Signature;
+        X-Andina-Timestamp plus X-Andina-Signature; or X-Austral-Signature.
+        Header presence selects the verification strategy only and does not
+        authenticate the sender. Verify the HMAC over the exact raw body bytes
+        before parsing. Reject missing or ambiguous header profiles. Return
+        HTTP 200 only after durable inbox/outbox acceptance or confirmed duplicate.
+        Andina requires HTTP 200 or 204 within five seconds; 200 is used here.
       parameters:
         - name: Quetzal-Signature
           in: header
-          required: true
-          description: >
-            t=<unix-seconds>,v1=<lowercase-hex-HMAC-SHA256>; rotation may
-            include multiple v1 values. The signed content is
-            "<timestamp>.<exact raw body bytes>".
+          required: false
+          description: Quetzal signature profile; required only for Quetzal requests
           schema:
             type: string
           example: "t=1795888803,v1=2d07770582c02f15235ac4e027b7732beef86be103c574a1c3b988a4275f5031"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/QuetzalEvent"
-      responses:
-        "200":
-          description: Notification durably accepted or recognized as duplicate
-        "400":
-          description: Malformed or unsupported event; not accepted
-        "401":
-          description: Signature invalid or timestamp outside the allowed window
-        "503":
-          description: Durable intake temporarily unavailable; provider should retry
-  /webhooks/v1/andina:
-    post:
-      tags: [Andina Pay]
-      operationId: receiveAndinaWebhook
-      summary: Receive an Andina Pay notification
-      description: >
-        Verify X-Andina-Signature against
-        "<X-Andina-Timestamp>.<exact raw body bytes>" using Base64 HMAC-SHA256.
-        Reject timestamps more than ten minutes from server time. Andina
-        requires HTTP 200 or 204 within five seconds. Retry attempts have new
-        notificacion_id values; use transaction ID, state and state-change time
-        for business-event deduplication.
-      parameters:
         - name: X-Andina-Timestamp
           in: header
-          required: true
-          description: ISO-8601 timestamp with UTC offset, included in signature
+          required: false
+          description: Andina signature profile; required with X-Andina-Signature
           schema:
             type: string
             format: date-time
           example: "2026-11-28T14:03:11-05:00"
         - name: X-Andina-Signature
           in: header
-          required: true
-          description: Base64-encoded HMAC-SHA256 of timestamp, dot, and exact raw body bytes
+          required: false
+          description: Base64 HMAC-SHA256 of timestamp, dot, and exact raw body bytes
           schema:
             type: string
+            minLength: 44
+            maxLength: 44
+            pattern: "^[A-Za-z0-9+/]{43}=$"
           example: "MFQjfviySi6CjqbWtQcy5spKtXxHIxAvmg5W3PTzPJk="
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AndinaNotification"
-      responses:
-        "200":
-          description: Notification durably accepted or recognized as duplicate
-        "204":
-          description: Notification durably accepted or recognized as duplicate
-        "400":
-          description: Malformed or unsupported notification; not accepted
-        "401":
-          description: Signature invalid or timestamp outside the allowed window
-        "503":
-          description: Durable intake temporarily unavailable; provider should retry
-  /webhooks/v1/austral:
-    post:
-      tags: [Austral Pagos]
-      operationId: receiveAustralWebhook
-      summary: Receive an Austral Pagos event
-      description: >
-        Contract for the Chile webhook route. Chile intake is part of the
-        end-to-end design, but its implementation is outside the Part B
-        practical scope. Verify X-Austral-Signature as lowercase-hex
-        HMAC-SHA256 over the exact raw body bytes before parsing. Austral does
-        not sign a timestamp; use eventId for replay detection. Return any 2xx
-        only after durable acceptance or a confirmed duplicate.
-      parameters:
         - name: X-Austral-Signature
           in: header
-          required: true
-          description: Lowercase hexadecimal HMAC-SHA256 of the exact raw body bytes
+          required: false
+          description: Austral signature profile; lowercase hex HMAC-SHA256 of exact raw body bytes
           schema:
             type: string
             pattern: "^[0-9a-f]{64}$"
@@ -126,16 +66,20 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AustralEvent"
+              description: Provider payload variant; runtime selection uses signature headers.
+              oneOf:
+                - $ref: "#/components/schemas/QuetzalEvent"
+                - $ref: "#/components/schemas/AndinaNotification"
+                - $ref: "#/components/schemas/AustralEvent"
       responses:
         "200":
-          description: Notification durably accepted or recognized as duplicate
+          description: Durably accepted or duplicate confirmed
         "400":
-          description: Malformed or unsupported event; not accepted
+          description: Malformed payload or missing/ambiguous provider header profile
         "401":
-          description: Signature invalid
+          description: Provider signature invalid or signed timestamp outside allowed window
         "503":
-          description: Durable intake temporarily unavailable; provider should retry
+          description: Durable intake or publisher unavailable; provider should retry
 components:
   schemas:
     QuetzalEvent:
@@ -168,11 +112,13 @@ components:
                 amount:
                   type: integer
                   minimum: 0
+                  maximum: 9999999999999999
                   description: Amount in minor units
                   example: 125000
                 amount_refunded:
                   type: integer
                   minimum: 0
+                  maximum: 9999999999999999
                   description: Refunded amount in minor units; present for charge.refunded
                   example: 25000
                 currency:
@@ -236,8 +182,11 @@ components:
               enum: [PENDIENTE, APROBADA, RECHAZADA, REVERSADA]
             valor:
               type: string
-              pattern: "^[0-9]+\\.[0-9]{2}$"
-              description: Decimal major-unit amount; parse exactly, never as binary float
+              maxLength: 17
+              pattern: "^[0-9]{1,14}\\.[0-9]{2}$"
+              description: >
+                Decimal major-unit amount with at most 14 integer digits so
+                it fits Salesforce Currency(16,2); parse exactly, never as binary float.
               example: "185000.00"
             moneda:
               type: string
@@ -287,8 +236,11 @@ components:
               maxLength: 80
             amount:
               type: string
-              pattern: "^[0-9]+$"
-              description: Integer CLP amount; CLP has no minor unit
+              maxLength: 14
+              pattern: "^[0-9]{1,14}$"
+              description: >
+                Integer CLP amount; CLP has no minor unit. Limited to 14 digits
+                to fit Salesforce Currency(16,2).
               example: "45990"
             currency:
               type: string

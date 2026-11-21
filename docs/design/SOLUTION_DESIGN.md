@@ -4,7 +4,20 @@
 
 The integration receives provider webhooks in Mexico, Colombia and Chile, authenticates them, normalizes them, and asynchronously records payment state in Salesforce and publishes a canonical event for Finance and Notifications. It does not implement either downstream consumer and must never write `Policy__c.Status__c`. Salesforce automation owns policy reinstatement/suspension.
 
-The design uses the existing API Manager as the only public entry point. Provider-specific authentication and mapping are isolated adapters; the durable intake, lifecycle, persistence and publication flow is shared.
+The design uses the existing API Manager as the only public entry point. All providers call one webhook resource; provider-specific authentication and mapping are isolated adapters, while the intake, lifecycle, persistence and publication flow is shared.
+
+### Architecture style — hexagonal and DDD
+
+The solution is the **Premium Payments** bounded context. Its domain owns provider-neutral concepts such as `PremiumPayment`, `PaymentKey`, `Money`, `PolicyNumber`, `PaymentStatus` and `CanonicalPaymentEvent`. Domain types do not depend on Spring, HTTP, JSON, Azure or Salesforce.
+
+- **Inbound adapter:** one Spring MVC/API Manager route, `POST /webhooks/v1/payments`, accepts the untouched body and request headers.
+- **Provider adapter factory:** selects exactly one registered `ProviderWebhookAdapter` from the provider's signature-header profile. Header presence selects a strategy only; it does not authenticate the caller. The selected adapter verifies HMAC before parsing or mapping. Missing or ambiguous provider headers are rejected.
+- **Provider adapters (anti-corruption layer):** Quetzal, Andina and Austral each implement signature verification and translation from their external payload to a provider-neutral payment notification. Only Quetzal and Andina are implemented in the Part B practical component.
+- **Application use case:** `ReceivePaymentNotification` coordinates adapter selection, verified mapping, idempotent persistence and acceptance response.
+- **Domain builder:** `CanonicalPaymentEventBuilder` creates the versioned canonical event and enforces common invariants, including money precision and provider-qualified event identity.
+- **Outbound ports:** secret retrieval, transactional inbox/outbox persistence and canonical-event publication. Azure Key Vault, SQL and Service Bus are infrastructure adapters. The outbox relay publishes asynchronously so provider response time is not coupled to broker or Salesforce latency.
+
+The adapter registry is open for extension: adding a provider supplies a new adapter and registration, without adding provider branches to the controller or shared use case.
 
 ## 2. Context and trust boundaries
 
@@ -19,7 +32,9 @@ flowchart LR
     APIM[API Manager: TLS, routing, throttling]
   end
   subgraph Integration
-    IN[Webhook intake and provider adapters]
+    IN[Single webhook endpoint]
+    FACTORY[Provider adapter factory]
+    ADAPTERS[Quetzal Andina Austral adapters]
     DB[Azure SQL inbox payment state and outbox]
     RELAY[Outbox relay]
     SB[Azure Service Bus topic and DLQ]
@@ -35,9 +50,12 @@ flowchart LR
   Q -->|HTTPS webhook| APIM
   A -->|HTTPS webhook| APIM
   U -->|HTTPS webhook| APIM
-  APIM --> IN
+  APIM -->|POST /webhooks/v1/payments| IN
+  IN --> FACTORY
+  FACTORY -->|signature-header profile| ADAPTERS
+  ADAPTERS -->|verify then map| IN
   IN -->|durable transaction| DB
-  IN -.-> SEC
+  ADAPTERS -.-> SEC
   DB --> RELAY
   RELAY --> SB
   SB --> WORKER
@@ -50,7 +68,7 @@ flowchart LR
   WORKER -.-> OBS
 ```
 
-Only the API Manager is internet-facing. TLS protects transport. Provider secrets and Salesforce credentials are retrieved from Key Vault via managed identities; they are not embedded in application settings. Internal Salesforce access is routed through the API Manager, not point-to-point. Operations access to status records is authenticated and authorized separately from provider endpoints.
+Only the API Manager is internet-facing. TLS protects transport. The single route selects an adapter using the provider-specific signature-header profile (Quetzal signature; Andina timestamp plus signature; Austral signature). This selection is not trusted as proof of authenticity: the selected adapter must validate HMAC over exact raw bytes before parsing. Missing or multiple matching profiles are rejected. Provider secrets and Salesforce credentials are retrieved from Key Vault via managed identities; they are not embedded in application settings. Internal Salesforce access is routed through the API Manager, not point-to-point. Operations access to status records is authenticated and authorized separately from webhook intake.
 
 ## 3. Notification sequence and failures
 
@@ -58,7 +76,9 @@ Only the API Manager is internet-facing. TLS protects transport. Provider secret
 sequenceDiagram
   participant P as Provider
   participant G as API Manager
-  participant I as Intake
+  participant C as Common webhook controller
+  participant F as Provider adapter factory
+  participant A as Selected provider adapter
   participant D as Azure SQL
   participant R as Outbox relay
   participant Q as Service Bus
@@ -66,15 +86,19 @@ sequenceDiagram
   participant M as Internal API
   participant S as Salesforce
 
-  P->>G: HTTPS webhook
-  G->>I: Route request
-  I->>I: Verify signature on exact raw body
+  P->>G: HTTPS POST /webhooks/v1/payments
+  G->>C: Forward raw body and headers unchanged
+  C->>F: Resolve from signature-header profile
+  F-->>C: Exactly one provider adapter
+  C->>A: Verify signature on exact raw body, then parse and map
   alt Invalid signature or payload
-    I-->>P: 4xx response
+    A-->>C: Reject request
+    C-->>P: 4xx response
   else Valid notification
-    I->>D: Commit inbox state and outbox
-    D-->>I: Durable commit
-    I-->>P: Provider success response
+    A-->>C: Canonical payment notification
+    C->>D: Commit inbox state and outbox atomically
+    D-->>C: Durable commit or duplicate confirmed
+    C-->>P: HTTP 200 within provider timeout
     R->>D: Read pending outbox
     R->>Q: Publish canonical event
     Q-->>R: Broker acknowledgement
@@ -100,7 +124,7 @@ The contract is provider-independent. `schemaVersion` is explicit. Amounts are r
 |---|---|
 | `schemaVersion` | Version of this canonical contract, initially `1`. |
 | `eventId` | Stable ID for this provider state-change event; deduplicates event delivery. |
-| `paymentKey` | Stable business payment key: `<country>:<provider>:<providerTransactionId>`. |
+| `paymentKey` | Stable business payment key: `<country>:<provider>:<SHA-256(providerTransactionId)>`. |
 | `country` | `MX`, `CO` or `CL`. |
 | `provider` | `Quetzal`, `Andina` or `Austral`. |
 | `providerEventId` | Provider event/notification identifier, when available. |
@@ -127,13 +151,15 @@ For Andina, the attempt identifier changes on retries, so it is not the business
 
 ## 5. Idempotency, ordering and lifecycle
 
-- `paymentKey` is uniquely constrained in the local payment table and maps to Salesforce `Payment_Key__c` (Text(80), External ID, Unique). Format includes country, provider and transaction ID; validate its length and provider ID constraints before acceptance.
+- `paymentKey` is uniquely constrained in the local payment table and maps to Salesforce `Payment_Key__c` (Text(80), External ID, Unique). It is `<country>:<provider>:<lowercase SHA-256 hex of providerTransactionId>` (for example `CO:Andina:<64 hex chars>`), keeping the key within 80 characters even when provider IDs are long. The original provider transaction ID is retained separately for lookup.
 - A unique inbox key per provider event prevents duplicate state events. For Quetzal/Austral use their stable event IDs. For Andina use transaction ID + state + state-change timestamp, while storing each `notificacion_id` in a separate delivery table/index.
 - Intake transactionally records the normalized event, provider identifiers, latest accepted payment state, and outbox row. A duplicate is acknowledged only after the existing durable record is confirmed.
 - State transitions are applied by provider event time, not arrival time. Older events are retained for audit/status but cannot overwrite a newer state. `pending` cannot downgrade a later terminal state. A later `refunded`/reversed event supersedes captured. A failed attempt does not create a second payment identity.
 - If timestamps tie and states conflict, quarantine the conflict rather than guess; specifications provide no common provider sequence number. This assumption is recorded in `docs/ASSUMPTIONS.md`.
 - Salesforce upsert by unique `Payment_Key__c` provides a second idempotency barrier. Worker sends the latest eligible payment projection; `Status_Changed_At__c` and `Last_Event_Id__c` are updated with the applied state.
 - Publication is at-least-once via outbox; downstream consumers receive stable event IDs and must deduplicate.
+
+The Part B practical stub now applies these ordering rules to an in-memory `PaymentState` guarded by a process-local critical section: older events cannot replace newer state, `pending` cannot regress a terminal state, `refunded` cannot regress to another status, and conflicting statuses at the same event time are rejected. The tests exercise out-of-order and concurrent arrivals. This is a behavioral stub, not a distributed consistency guarantee: the production SQL adapter must atomically persist inbox, payment state and outbox with uniqueness constraints and optimistic version checks or row locks.
 
 ## 6. Errors, retries, DLQ and replay
 

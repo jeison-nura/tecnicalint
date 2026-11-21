@@ -1,4 +1,4 @@
-# ADR-0002: MuleSoft integration and Azure SQL state store
+# ADR-0002: Java 21 integration component and Azure SQL state store
 
 - **Status:** Proposed
 - **Date:** 2026-11-20
@@ -9,13 +9,13 @@ Meridian already operates an enterprise integration platform with API Manager an
 
 ## Options considered
 
-### Option 1 — Mule 4 with Azure SQL (chosen)
+### Option 1 — Mule 4 with Azure SQL
 - Pros: aligns with the existing integration runtime and API Manager; provider adapters and shared orchestration fit the integration platform; SQL unique constraints and transactions support inbox/outbox and lifecycle ordering; relational status data is easy to query for operations.
 - Cons: Mule runtime and licensing/operational footprint may cost more than a small serverless service; SQL requires capacity management and schema migrations; transactional behavior across SQL and broker still requires an outbox.
 
-### Option 2 — Java 21 service with Azure SQL
-- Pros: broad library/testing ecosystem and explicit control over webhook crypto and concurrency; SQL provides the same transactional/idempotency capabilities.
-- Cons: adds a runtime and operational stack alongside the existing Mule platform; less reuse of established integration operations; Part B would require justification in a separate implementation decision.
+### Option 2 — Java 21 Spring Boot service with Azure SQL (chosen for the practical component)
+- Pros: accepted by the assessment; direct control over raw-byte signature verification, provider adapters and idempotency; JUnit tests can exercise the supplied signature vectors; SQL provides transactional inbox/outbox capabilities.
+- Cons: adds a runtime and operational stack alongside the existing Mule platform; less reuse of established integration operations; requires Spring Boot patching and Java runtime support.
 
 ### Option 3 — Mule 4 with a NoSQL state store
 - Pros: elastic partitioned throughput and flexible document storage.
@@ -23,10 +23,10 @@ Meridian already operates an enterprise integration platform with API Manager an
 
 ## Decision
 
-Use Mule 4 for the shared integration application, with provider-specific verification/mapping modules and a relational Azure SQL store for inbox, payment lifecycle, outbox and operational status. Use durable messaging with a DLQ between intake/publication and asynchronous Salesforce processing. Keep broker and persistence behind clear application connectors/interfaces so the practical component can stub them.
+Use Java 21 with Spring Boot 3 for the Part B practical intake. This is the assessment's explicitly accepted alternative and makes provider signature verification and automated tests straightforward to review. Keep provider adapters isolated and define storage/publication behind interfaces. In the target design, use relational Azure SQL for inbox, payment lifecycle, outbox and operational status, plus durable messaging with a DLQ. The practical project uses test stubs for those external dependencies as required; it does not claim the in-memory stub is production durable.
 
 ## Consequences
 
-- Positive: leverages the existing integration capability; relational transactions and uniqueness constraints make deduplication and state transitions explicit; operations gets indexed lookups without raw-log search.
-- Negative: SQL and Mule introduce baseline cost and require HA, backup, migration and capacity decisions; the outbox relay and broker are additional components.
-- Risks and how they are mitigated: storage/broker outages must fail closed (no success response before durable commit); add health/backlog alerts, tested recovery and capacity headroom. Avoid sensitive-data persistence and use managed identity/least privilege. If the assessment practical is implemented in Java, document that deviation and justification in this ADR before implementation.
+- Positive: practical code can prove raw-byte HMAC verification and duplicate handling with JUnit; relational transactions and uniqueness constraints make target deduplication and state transitions explicit.
+- Negative: Java adds a runtime alongside the existing Mule platform; SQL and broker still require HA, backup, migrations and operational ownership.
+- Risks and how they are mitigated: practical in-memory adapters are demonstrative stubs only and must be replaced by transactional persistence/outbox and durable messaging before production. Storage/broker failures must fail closed; avoid sensitive-data persistence and use managed identity/least privilege.
